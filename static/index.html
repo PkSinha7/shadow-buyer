@@ -433,6 +433,72 @@ async function runRipple(){
     const eventNote = body.selected_events.length
       ? `<p style="font-size:12px;color:#8A8272;margin-top:4px;">Simulated assuming: ${body.selected_events.map(id => allEvents.find(e => e.id === id)?.label || id).join(', ')}</p>`
       : '';
+
+    // Price curve: bar per price point, highlight requested vs best-revenue point
+    const maxRevenue = Math.max(...data.price_curve.map(p => p.predicted_revenue));
+    const curveRows = data.price_curve.map(p => {
+      const barPct = (p.predicted_revenue / maxRevenue) * 100;
+      let barColor = '#8A8272';
+      if (p.is_best) barColor = '#2F6B4F';
+      else if (p.is_requested) barColor = '#E3A008';
+      const tag = p.is_best ? ' 🏆 best' : (p.is_requested ? ' ← your pick' : '');
+      return `
+        <div class="sens-row ${p.is_requested ? 'highlight' : ''}">
+          <span style="min-width:130px;">${p.price_change_pct > 0 ? '+' : ''}${p.price_change_pct}% (₹${p.price})${tag}</span>
+          <div class="sens-bar-track"><div class="sens-bar-fill" style="width:${barPct}%;background:${barColor};"></div></div>
+          <span style="min-width:80px;text-align:right;">₹${p.predicted_revenue.toLocaleString('en-IN')}</span>
+        </div>
+      `;
+    }).join('');
+    const bestNote = data.best_point.price_change_pct !== Math.round(body.price_change_pct)
+      ? `<p style="font-size:12px;color:#8A8272;margin-top:8px;">Based on this model, a <strong>${data.best_point.price_change_pct > 0 ? '+' : ''}${data.best_point.price_change_pct}% change</strong> (₹${data.best_point.price}) would maximize predicted revenue at ₹${data.best_point.predicted_revenue.toLocaleString('en-IN')}.</p>`
+      : '';
+    const curveHtml = `
+      <div class="report-section">
+        <p class="report-title">Revenue across different price points</p>
+        ${curveRows}
+        ${bestNote}
+      </div>
+    `;
+
+    // RTO / return volume estimate
+    const rr = data.rto_return_estimate;
+    const rtoHtml = `
+      <div class="report-section">
+        <p class="report-title">Estimated orders lost to RTO &amp; returns</p>
+        <div class="benchmark-compare">
+          <div class="benchmark-col">
+            <div class="bc-label">At current price</div>
+            <div class="bc-value" style="font-size:15px;">${rr.current_est_rto_orders} RTO<br>${rr.current_est_return_orders} returns</div>
+          </div>
+          <div class="benchmark-col">
+            <div class="bc-label">At new price</div>
+            <div class="bc-value" style="font-size:15px;">${rr.new_est_rto_orders} RTO<br>${rr.new_est_return_orders} returns</div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Similar products at the new price
+    const simRows = data.similar_at_new_price.map(p => `
+      <tr>
+        <td>${p.title}</td>
+        <td>₹${p.price}</td>
+        <td>${p.rating}★</td>
+        <td>${p.orders_last_30d}</td>
+        <td class="${p.succeeded ? 'succ-yes' : 'succ-no'}">${p.succeeded ? 'Succeeded' : 'Did not'}</td>
+      </tr>
+    `).join('');
+    const similarHtml = `
+      <div class="report-section">
+        <p class="report-title">Other products priced near ₹${data.new_price}</p>
+        <table class="mini-table">
+          <tr><th>Product</th><th>Price</th><th>Rating</th><th>Orders/30d</th><th>Outcome</th></tr>
+          ${simRows}
+        </table>
+      </div>
+    `;
+
     resultDiv.innerHTML = `
       <div class="result">
         <p class="verdict ${cls}">${data.recommendation}</p>
@@ -443,6 +509,9 @@ async function runRipple(){
           <div class="stat"><div class="label">Orders after</div><div class="value">${data.new_predicted_orders}</div></div>
           <div class="stat"><div class="label">Revenue change</div><div class="value">${data.revenue_change_pct}%</div></div>
         </div>
+        ${curveHtml}
+        ${rtoHtml}
+        ${similarHtml}
       </div>
     `;
   } catch (e) {

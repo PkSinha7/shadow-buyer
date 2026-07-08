@@ -333,6 +333,52 @@ def predict_ripple(req: RippleRequest):
     new_revenue = new_orders * new_product["price"]
     revenue_change_pct = ((new_revenue - current_revenue) / current_revenue * 100) if current_revenue > 0 else 0
 
+    # ---- Full price sensitivity curve, not just the one requested change ----
+    # Scans a range of price changes so the seller can see the whole shape,
+    # not just compare two points -- and highlights which one maximizes revenue.
+    curve_points_pct = sorted(set([-30, -20, -10, 0, 10, 20, 30, round(req.price_change_pct)]))
+    price_curve = []
+    for pct in curve_points_pct:
+        variant = dict(product)
+        variant["price"] = product["price"] * (1 + pct / 100)
+        orders_v = _predict_orders(variant)
+        revenue_v = orders_v * variant["price"]
+        price_curve.append({
+            "price_change_pct": pct,
+            "price": round(variant["price"], 2),
+            "predicted_orders": round(orders_v, 1),
+            "predicted_revenue": round(revenue_v, 2),
+            "is_requested": pct == round(req.price_change_pct),
+        })
+    best_point = max(price_curve, key=lambda p: p["predicted_revenue"])
+    for p in price_curve:
+        p["is_best"] = p is best_point
+
+    # ---- Estimated RTO / return order volume at each scenario ----
+    # Pure order-count estimates (orders x rate) -- concrete, not cost figures,
+    # since we don't have per-product shipping cost data to convert to rupees.
+    rto_return_estimate = {
+        "current_est_rto_orders": round(current_orders * product["rto_rate"], 1),
+        "current_est_return_orders": round(current_orders * product["return_rate"], 1),
+        "new_est_rto_orders": round(new_orders * product["rto_rate"], 1),
+        "new_est_return_orders": round(new_orders * product["return_rate"], 1),
+    }
+
+    # ---- Similar real products priced near the NEW (post-change) price ----
+    cat_products = df[df["category"] == category].copy()
+    cat_products["price_diff"] = (cat_products["price"] - new_product["price"]).abs()
+    similar = cat_products.sort_values("price_diff").head(4)
+    similar_at_new_price = [
+        {
+            "title": r["product_title"],
+            "price": round(float(r["price"]), 2),
+            "rating": round(float(r["rating"]), 2),
+            "orders_last_30d": int(r["orders_last_30d"]),
+            "succeeded": bool(r["succeeded"]),
+        }
+        for _, r in similar.iterrows()
+    ]
+
     return {
         "product_id": req.product_id,
         "product_title": product["product_title"],
@@ -353,6 +399,10 @@ def predict_ripple(req: RippleRequest):
             "return_rate": round(float(cat_trend["return_rate"]), 3),
             "momentum_pct": round(float(cat_trend["momentum"]) * 100, 1),
         },
+        "price_curve": price_curve,
+        "best_point": {"price_change_pct": best_point["price_change_pct"], "price": best_point["price"], "predicted_revenue": best_point["predicted_revenue"]},
+        "rto_return_estimate": rto_return_estimate,
+        "similar_at_new_price": similar_at_new_price,
     }
 
 
