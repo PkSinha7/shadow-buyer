@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Shadow Buyer</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@500;600&family=Inter:wght@400;500;600&display=swap');
+  :root{
+    --ink:#122023; --teal:#0F3D3E; --teal-deep:#0A2B2C;
+    --paper:#F4F1EA; --paper-line:#E4DECF;
+    --amber:#E3A008; --amber-deep:#B87E05;
+    --red:#B3401E; --green:#2F6B4F; --white:#FFFDF9;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:'Inter',sans-serif;background:var(--paper);color:var(--ink);}
+  .app{max-width:820px;margin:0 auto;padding:28px 20px 60px;}
+  header{background:var(--teal-deep);color:var(--white);border-radius:14px;padding:26px 28px;margin-bottom:22px;}
+  .eyebrow{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--amber);margin:0 0 6px;}
+  h1{font-family:'Space Grotesk',sans-serif;font-size:26px;margin:0 0 4px;}
+  .sub{color:#CFE0DD;font-size:14px;margin:0;max-width:520px;}
+
+  .tabs{display:flex;gap:8px;margin-bottom:18px;}
+  .tab{padding:10px 18px;border-radius:8px;font-weight:600;font-size:14px;cursor:pointer;background:var(--white);border:1px solid var(--paper-line);}
+  .tab.active{background:var(--teal-deep);color:var(--white);}
+
+  .card{background:var(--white);border:1px solid var(--paper-line);border-radius:12px;padding:22px;}
+  .field{margin-bottom:14px;}
+  label{display:block;font-size:12.5px;font-weight:600;color:#5B564A;margin-bottom:5px;}
+  input, select{
+    width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--paper-line);
+    font-family:'Inter',sans-serif;font-size:14px;background:var(--paper);
+  }
+  button{
+    font-family:'Inter',sans-serif;font-weight:600;font-size:14px;
+    border:none;border-radius:8px;padding:11px 18px;cursor:pointer;background:var(--amber);color:var(--teal-deep);
+  }
+  button:hover{background:var(--amber-deep);}
+
+  .result{margin-top:18px;padding:16px;border-radius:10px;background:#F1EFE6;}
+  .verdict{font-family:'Space Grotesk',sans-serif;font-size:18px;margin:0 0 8px;}
+  .verdict.good{color:var(--green);}
+  .verdict.mid{color:var(--amber-deep);}
+  .verdict.bad{color:var(--red);}
+  .prob{font-family:'IBM Plex Mono',monospace;font-size:13px;color:#5B564A;margin-bottom:10px;}
+  ul{margin:8px 0 0;padding-left:18px;font-size:13.5px;line-height:1.6;}
+  .error{color:var(--red);font-size:13.5px;margin-top:10px;}
+
+  .stat-row{display:flex;gap:14px;margin-top:14px;}
+  .stat{flex:1;background:var(--paper);border-radius:8px;padding:12px;text-align:center;}
+  .stat .label{font-size:11px;color:#7A7364;text-transform:uppercase;letter-spacing:.05em;}
+  .stat .value{font-family:'Space Grotesk',sans-serif;font-size:18px;margin-top:4px;}
+  .hidden{display:none;}
+  .chip-row{display:flex;flex-wrap:wrap;gap:8px;}
+  .chip{
+    padding:8px 14px;border-radius:20px;border:1px solid var(--paper-line);
+    background:var(--white);font-size:13px;font-weight:600;cursor:pointer;
+    user-select:none;transition:background .15s ease, border-color .15s ease;
+  }
+  .chip:hover{background:#F1EFE6;}
+  .chip.selected{background:var(--teal-deep);color:var(--white);border-color:var(--teal-deep);}
+  .metric-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;}
+  .metric{background:var(--white);border-radius:6px;padding:8px 10px;position:relative;}
+  .metric .m-label{font-size:10.5px;color:#8A8272;text-transform:uppercase;letter-spacing:.03em;display:flex;align-items:center;gap:4px;}
+  .metric .m-value{font-family:'Space Grotesk',sans-serif;font-size:15px;margin-top:2px;}
+  .info-dot{
+    display:inline-flex;align-items:center;justify-content:center;
+    width:14px;height:14px;border-radius:50%;background:#D9D4C4;color:#5B564A;
+    font-size:10px;font-weight:700;cursor:help;flex-shrink:0;
+  }
+  .info-dot:hover + .tooltip, .info-dot:focus + .tooltip{display:block;}
+  .tooltip{
+    display:none;position:absolute;bottom:100%;left:0;margin-bottom:6px;
+    background:var(--teal-deep);color:var(--white);padding:8px 10px;border-radius:6px;
+    font-size:11.5px;line-height:1.4;width:220px;z-index:10;font-weight:400;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <p class="eyebrow">Seller tool &middot; Shadow Buyer</p>
+    <h1>Test it before you list it.</h1>
+    <p class="sub">Predict whether a new product will succeed, and simulate what a price change would do to your revenue &mdash; before you commit.</p>
+  </header>
+
+  <div class="tabs">
+    <div class="tab active" id="tabDesirability" onclick="switchTab('desirability')">Will it sell?</div>
+    <div class="tab" id="tabRipple" onclick="switchTab('ripple')">Price drop simulator</div>
+  </div>
+
+  <div class="card" id="desirabilityPanel">
+    <div class="field">
+      <label>Your seller ID</label>
+      <select id="sellerId"></select>
+    </div>
+    <div class="field">
+      <label>Category</label>
+      <select id="category"></select>
+    </div>
+    <div class="field">
+      <label>Price (₹)</label>
+      <input type="number" id="price" value="699">
+    </div>
+    <div class="field">
+      <label>Discount % (if any)</label>
+      <input type="number" id="discount" value="0">
+    </div>
+    <div class="field" id="categorySignalBox">
+      <label>How is this category doing right now? <span style="font-weight:400;color:#8A8272;">(based on the last 12 months of platform data)</span></label>
+      <div id="signalBody">Loading...</div>
+    </div>
+    <div class="field">
+      <label>Is any festival or sale season coming up? <span style="font-weight:400;color:#8A8272;">(select any that apply, or none)</span></label>
+      <div id="eventChips" class="chip-row">Loading...</div>
+    </div>
+    <button onclick="checkDesirability()">Check desirability</button>
+    <div id="desirabilityResult"></div>
+  </div>
+
+  <div class="card hidden" id="ripplePanel">
+    <div class="field">
+      <label>Your seller ID</label>
+      <select id="sellerId2" onchange="loadProductsForSeller()"></select>
+    </div>
+    <div class="field">
+      <label>Product</label>
+      <select id="productId" onchange="loadRippleCategorySignal()"></select>
+    </div>
+    <div class="field" id="rippleCategorySignalBox">
+      <label>How is this category doing right now? <span style="font-weight:400;color:#8A8272;">(based on the last 12 months of platform data)</span></label>
+      <div id="rippleSignalBody">Loading...</div>
+    </div>
+    <div class="field">
+      <label>Is any festival or sale season coming up? <span style="font-weight:400;color:#8A8272;">(select any that apply, or none)</span></label>
+      <div id="rippleEventChips" class="chip-row">Loading...</div>
+    </div>
+    <div class="field">
+      <label>Price change % (negative = drop, e.g. -15)</label>
+      <input type="number" id="priceChange" value="-15">
+    </div>
+    <button onclick="runRipple()">Simulate</button>
+    <div id="rippleResult"></div>
+  </div>
+</div>
+
+<script>
+const API = "";
+let selectedEvents = new Set();
+let selectedEventsRipple = new Set();
+let allEvents = [];
+let productCategoryMap = {};
+
+function switchTab(tab){
+  document.getElementById('desirabilityPanel').classList.toggle('hidden', tab !== 'desirability');
+  document.getElementById('ripplePanel').classList.toggle('hidden', tab !== 'ripple');
+  document.getElementById('tabDesirability').classList.toggle('active', tab === 'desirability');
+  document.getElementById('tabRipple').classList.toggle('active', tab === 'ripple');
+}
+
+async function init(){
+  const sellers = await (await fetch(`${API}/sellers`)).json();
+  const categories = await (await fetch(`${API}/categories`)).json();
+  allEvents = await (await fetch(`${API}/events`)).json();
+
+  ['sellerId', 'sellerId2'].forEach(id => {
+    const el = document.getElementById(id);
+    el.innerHTML = sellers.map(s => `<option value="${s}">${s}</option>`).join('');
+  });
+  document.getElementById('category').innerHTML = categories.map(c => `<option value="${c}">${c}</option>`).join('');
+  document.getElementById('category').addEventListener('change', loadCategorySignal);
+
+  renderEventChips('eventChips', selectedEvents, 'toggleEvent');
+  renderEventChips('rippleEventChips', selectedEventsRipple, 'toggleEventRipple');
+
+  await loadProductsForSeller();
+  await loadCategorySignal();
+}
+
+function renderEventChips(containerId, selectedSet, toggleFnName){
+  const chipRow = document.getElementById(containerId);
+  chipRow.innerHTML = allEvents.map(ev =>
+    `<div class="chip" data-container="${containerId}" data-id="${ev.id}" onclick="${toggleFnName}('${ev.id}')">${ev.label}</div>`
+  ).join('');
+}
+
+function toggleEvent(id){ toggleEventGeneric('eventChips', selectedEvents, id); }
+function toggleEventRipple(id){ toggleEventGeneric('rippleEventChips', selectedEventsRipple, id); }
+
+function toggleEventGeneric(containerId, selectedSet, id){
+  const chip = document.querySelector(`.chip[data-container="${containerId}"][data-id="${id}"]`);
+  if (selectedSet.has(id)) {
+    selectedSet.delete(id);
+    chip.classList.remove('selected');
+  } else {
+    selectedSet.add(id);
+    chip.classList.add('selected');
+  }
+}
+
+function renderSignalGrid(data){
+  const ex = data.explainers;
+  const momentumDir = data.momentum_pct >= 0 ? '+' : '';
+  const drrDir = data.drr_change_pct >= 0 ? '+' : '';
+  return `
+    <div class="metric-grid">
+      <div class="metric">
+        <div class="m-label">Daily orders (DRR)
+          <span class="info-dot" tabindex="0">i</span>
+          <div class="tooltip">${ex.drr}</div>
+        </div>
+        <div class="m-value">${data.drr} <span style="font-size:11px;color:${data.drr_change_pct >= 0 ? '#2F6B4F' : '#B3401E'};">(${drrDir}${data.drr_change_pct}% vs last month)</span></div>
+      </div>
+      <div class="metric">
+        <div class="m-label">3-month trend
+          <span class="info-dot" tabindex="0">i</span>
+          <div class="tooltip">${ex.momentum}</div>
+        </div>
+        <div class="m-value" style="color:${data.momentum_pct >= 0 ? '#2F6B4F' : '#B3401E'};">${momentumDir}${data.momentum_pct}%</div>
+      </div>
+      <div class="metric">
+        <div class="m-label">Cash on delivery
+          <span class="info-dot" tabindex="0">i</span>
+          <div class="tooltip">${ex.cod_share}</div>
+        </div>
+        <div class="m-value">${(data.cod_share * 100).toFixed(0)}%</div>
+      </div>
+      <div class="metric">
+        <div class="m-label">RTO rate
+          <span class="info-dot" tabindex="0">i</span>
+          <div class="tooltip">${ex.rto_rate}</div>
+        </div>
+        <div class="m-value" style="color:${data.rto_rate > 0.12 ? '#B3401E' : 'inherit'};">${(data.rto_rate * 100).toFixed(1)}%</div>
+      </div>
+      <div class="metric" style="grid-column:1 / -1;">
+        <div class="m-label">Return rate
+          <span class="info-dot" tabindex="0">i</span>
+          <div class="tooltip">${ex.return_rate}</div>
+        </div>
+        <div class="m-value" style="color:${data.return_rate > 0.14 ? '#B3401E' : 'inherit'};">${(data.return_rate * 100).toFixed(1)}%</div>
+      </div>
+    </div>
+  `;
+}
+
+async function loadCategorySignal(){
+  const category = document.getElementById('category').value;
+  const box = document.getElementById('signalBody');
+  box.innerHTML = "Loading...";
+  try {
+    const res = await fetch(`${API}/category_trends/${encodeURIComponent(category)}`);
+    const data = await res.json();
+    box.innerHTML = renderSignalGrid(data);
+  } catch (e) {
+    box.innerHTML = '<p class="error">Could not load category signal.</p>';
+  }
+}
+
+async function loadRippleCategorySignal(){
+  const productId = document.getElementById('productId').value;
+  const category = productCategoryMap[productId];
+  const box = document.getElementById('rippleSignalBody');
+  if (!category) { box.innerHTML = ''; return; }
+  box.innerHTML = "Loading...";
+  try {
+    const res = await fetch(`${API}/category_trends/${encodeURIComponent(category)}`);
+    const data = await res.json();
+    box.innerHTML = renderSignalGrid(data);
+  } catch (e) {
+    box.innerHTML = '<p class="error">Could not load category signal.</p>';
+  }
+}
+
+async function loadProductsForSeller(){
+  const seller = document.getElementById('sellerId2').value;
+  const products = await (await fetch(`${API}/products/${seller}`)).json();
+  productCategoryMap = {};
+  products.forEach(p => { productCategoryMap[p.product_id] = p.category; });
+  document.getElementById('productId').innerHTML = products.map(p =>
+    `<option value="${p.product_id}">${p.product_title} (${p.product_id}, ₹${p.price})</option>`
+  ).join('');
+  await loadRippleCategorySignal();
+}
+
+async function checkDesirability(){
+  const body = {
+    seller_id: document.getElementById('sellerId').value,
+    category: document.getElementById('category').value,
+    price: parseFloat(document.getElementById('price').value),
+    discount_pct: parseFloat(document.getElementById('discount').value),
+    selected_events: Array.from(selectedEvents),
+  };
+  const resultDiv = document.getElementById('desirabilityResult');
+  resultDiv.innerHTML = '<p style="color:#7A7364;font-size:13px;">Checking...</p>';
+
+  try {
+    const res = await fetch(`${API}/predict_desirability`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (!res.ok) { resultDiv.innerHTML = `<p class="error">${data.detail}</p>`; return; }
+
+    const cls = data.success_probability >= 0.65 ? 'good' : data.success_probability >= 0.4 ? 'mid' : 'bad';
+    resultDiv.innerHTML = `
+      <div class="result">
+        <p class="verdict ${cls}">${data.verdict}</p>
+        <p class="prob">Success probability: ${(data.success_probability * 100).toFixed(1)}% <span style="color:#8A8272;">— based on similar products in this category historically</span></p>
+        <ul>${data.tips.map(t => `<li>${t}</li>`).join('')}</ul>
+      </div>
+    `;
+  } catch (e) {
+    resultDiv.innerHTML = `<p class="error">Could not reach the prediction API. Is the server running?</p>`;
+  }
+}
+
+async function runRipple(){
+  const body = {
+    product_id: document.getElementById('productId').value,
+    price_change_pct: parseFloat(document.getElementById('priceChange').value),
+    selected_events: Array.from(selectedEventsRipple),
+  };
+  const resultDiv = document.getElementById('rippleResult');
+  resultDiv.innerHTML = '<p style="color:#7A7364;font-size:13px;">Simulating...</p>';
+
+  try {
+    const res = await fetch(`${API}/predict_ripple`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (!res.ok) { resultDiv.innerHTML = `<p class="error">${data.detail}</p>`; return; }
+
+    const cls = data.revenue_change_pct > 0 ? 'good' : 'bad';
+    const eventNote = body.selected_events.length
+      ? `<p style="font-size:12px;color:#8A8272;margin-top:4px;">Simulated assuming: ${body.selected_events.map(id => allEvents.find(e => e.id === id)?.label || id).join(', ')}</p>`
+      : '';
+    resultDiv.innerHTML = `
+      <div class="result">
+        <p class="verdict ${cls}">${data.recommendation}</p>
+        <p class="prob">${data.product_title} &middot; ₹${data.current_price} → ₹${data.new_price}</p>
+        ${eventNote}
+        <div class="stat-row">
+          <div class="stat"><div class="label">Orders now</div><div class="value">${data.current_predicted_orders}</div></div>
+          <div class="stat"><div class="label">Orders after</div><div class="value">${data.new_predicted_orders}</div></div>
+          <div class="stat"><div class="label">Revenue change</div><div class="value">${data.revenue_change_pct}%</div></div>
+        </div>
+      </div>
+    `;
+  } catch (e) {
+    resultDiv.innerHTML = `<p class="error">Could not reach the prediction API. Is the server running?</p>`;
+  }
+}
+
+init();
+</script>
+</body>
+</html>
