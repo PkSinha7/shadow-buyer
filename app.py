@@ -27,6 +27,25 @@ rp_bundle = joblib.load("ripple_model.joblib")
 seller_stats = sb_bundle["seller_stats"].set_index("seller_id")
 trend_summary = sb_bundle["trend_summary"]  # indexed by category
 
+# ---------- Optional: TabPFN (tabular foundation model) as an upgrade over Random Forest ----------
+# Never required. If tabpfn isn't installed, or the training script couldn't fetch it
+# (needs a Hugging Face account + accepted terms + login -- see train_shadow_buyer.py),
+# this silently stays off and every prediction just uses Random Forest as before.
+TABPFN_READY = False
+tabpfn_model = None
+try:
+    if sb_bundle.get("tabpfn_train_X") is not None:
+        from tabpfn import TabPFNClassifier
+        tabpfn_model = TabPFNClassifier(device="cpu")
+        tabpfn_model.fit(sb_bundle["tabpfn_train_X"], sb_bundle["tabpfn_train_y"])
+        TABPFN_READY = True
+        print("TabPFN loaded -- Shadow Buyer will use it as the primary model, with Random Forest as fallback.")
+    else:
+        print("TabPFN context not found in bundle (wasn't available at training time) -- using Random Forest.")
+except Exception as e:
+    print(f"TabPFN failed to load ({type(e).__name__}) -- using Random Forest instead. This is safe and expected if TabPFN isn't set up.")
+    TABPFN_READY = False
+
 # Dummy seasonal/event presets. Each event boosts different categories by
 # different amounts (e.g. Diwali helps Jewellery/Kurtis a lot, barely helps
 # Electronics). These are illustrative estimates, not derived from real data --
@@ -88,6 +107,16 @@ class DesirabilityRequest(BaseModel):
     )
 
 
+def _predict_prob(X: pd.DataFrame) -> tuple[float, str]:
+    """Returns (success_probability, model_used). Tries TabPFN first if ready, falls back to Random Forest."""
+    if TABPFN_READY:
+        try:
+            return float(tabpfn_model.predict_proba(X)[0, 1]), "tabpfn"
+        except Exception as e:
+            print(f"TabPFN prediction failed for this request ({type(e).__name__}) -- using Random Forest instead.")
+    return float(sb_bundle["model"].predict_proba(X)[0, 1]), "random_forest"
+
+
 @app.post("/predict_desirability")
 def predict_desirability(req: DesirabilityRequest):
     if req.seller_id not in seller_stats.index:
@@ -107,21 +136,23 @@ def predict_desirability(req: DesirabilityRequest):
     event_boost = sum(EVENT_PRESETS[e]["boost"].get(req.category, 0.0) for e in req.selected_events)
     trend_score = min(1.0, base_trend + event_boost)
 
-    row = {
-        "price": req.price,
-        "discount_pct": req.discount_pct,
-        "trend_score": trend_score,
-        "cod_share": float(cat_trend["cod_share"]),
-        "rto_rate": float(cat_trend["rto_rate"]),
-        "return_rate": float(cat_trend["return_rate"]),
-        "seller_success_rate": s["seller_success_rate"],
-        "seller_avg_rating": s["seller_avg_rating"],
-    }
-    for c in sb_bundle["categories"]:
-        row[f"cat_{c}"] = 1 if c == req.category else 0
+    def build_row(price: float, discount_pct: float) -> pd.DataFrame:
+        row = {
+            "price": price,
+            "discount_pct": discount_pct,
+            "trend_score": trend_score,
+            "cod_share": float(cat_trend["cod_share"]),
+            "rto_rate": float(cat_trend["rto_rate"]),
+            "return_rate": float(cat_trend["return_rate"]),
+            "seller_success_rate": s["seller_success_rate"],
+            "seller_avg_rating": s["seller_avg_rating"],
+        }
+        for c in sb_bundle["categories"]:
+            row[f"cat_{c}"] = 1 if c == req.category else 0
+        return pd.DataFrame([row])[sb_bundle["feature_cols"]]
 
-    X = pd.DataFrame([row])[sb_bundle["feature_cols"]]
-    prob_success = float(sb_bundle["model"].predict_proba(X)[0, 1])
+    X = build_row(req.price, req.discount_pct)
+    prob_success, model_used = _predict_prob(X)
 
     if prob_success >= 0.65:
         verdict = "likely to succeed"
@@ -150,8 +181,53 @@ def predict_desirability(req: DesirabilityRequest):
     if not tips:
         tips.append("No major red flags — this looks like a reasonably solid listing.")
 
+    # ---- Price benchmark: how this price compares to the category ----
+    cat_products = df[df["category"] == req.category]
+    successful_products = cat_products[cat_products["succeeded"] == 1]
+    category_median_price = float(cat_products["price"].median())
+    successful_median_price = float(successful_products["price"].median()) if len(successful_products) else category_median_price
+    price_percentile = float((cat_products["price"] < req.price).mean() * 100)
+
+    # ---- Similar real products in this category, closest by price ----
+    cat_products = cat_products.copy()
+    cat_products["price_diff"] = (cat_products["price"] - req.price).abs()
+    similar = cat_products.sort_values("price_diff").head(4)
+    similar_products = [
+        {
+            "title": r["product_title"],
+            "price": round(float(r["price"]), 2),
+            "rating": round(float(r["rating"]), 2),
+            "orders_last_30d": int(r["orders_last_30d"]),
+            "succeeded": bool(r["succeeded"]),
+        }
+        for _, r in similar.iterrows()
+    ]
+
+    # ---- Sensitivity: how nearby price/discount choices shift the outcome ----
+    sensitivity = []
+    variants = [
+        ("20% lower price", req.price * 0.8, req.discount_pct),
+        ("10% lower price", req.price * 0.9, req.discount_pct),
+        ("Your price", req.price, req.discount_pct),
+        ("10% higher price", req.price * 1.1, req.discount_pct),
+        ("+10% extra discount", req.price, min(100.0, req.discount_pct + 10)),
+    ]
+    for label, p, d in variants:
+        Xv = build_row(round(p, 2), d)
+        prob_v, _ = _predict_prob(Xv)
+        sensitivity.append({
+            "label": label,
+            "price": round(p, 2),
+            "discount_pct": d,
+            "success_probability": round(prob_v, 3),
+        })
+
+    # ---- Seller vs category benchmark ----
+    category_avg_success_rate = float(df[df["category"] == req.category]["succeeded"].mean())
+
     return {
         "success_probability": round(prob_success, 3),
+        "model_used": model_used,
         "verdict": verdict,
         "tips": tips,
         "category_signal": {
@@ -162,6 +238,17 @@ def predict_desirability(req: DesirabilityRequest):
             "rto_rate": round(float(cat_trend["rto_rate"]), 3),
             "return_rate": round(float(cat_trend["return_rate"]), 3),
             "momentum_pct": round(float(cat_trend["momentum"]) * 100, 1),
+        },
+        "price_benchmark": {
+            "category_median_price": round(category_median_price, 2),
+            "successful_median_price": round(successful_median_price, 2),
+            "price_percentile": round(price_percentile, 1),
+        },
+        "similar_products": similar_products,
+        "sensitivity": sensitivity,
+        "seller_benchmark": {
+            "seller_success_rate": round(float(s["seller_success_rate"]), 3),
+            "category_avg_success_rate": round(category_avg_success_rate, 3),
         },
     }
 

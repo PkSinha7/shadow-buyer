@@ -73,6 +73,30 @@
     background:var(--teal-deep);color:var(--white);padding:8px 10px;border-radius:6px;
     font-size:11.5px;line-height:1.4;width:220px;z-index:10;font-weight:400;
   }
+
+  .report-section{margin-top:16px;padding-top:14px;border-top:1px solid var(--paper-line);}
+  .report-title{font-family:'Space Grotesk',sans-serif;font-size:13.5px;margin:0 0 10px;color:var(--ink);}
+
+  .percentile-track{position:relative;height:8px;border-radius:4px;background:var(--paper-line);margin:8px 0 6px;}
+  .percentile-fill{position:absolute;left:0;top:0;height:100%;border-radius:4px;background:var(--teal);}
+  .percentile-marker{position:absolute;top:-4px;width:2px;height:16px;background:var(--red);}
+  .benchmark-row{font-size:12.5px;color:#5B564A;display:flex;justify-content:space-between;margin-top:4px;}
+
+  .mini-table{width:100%;border-collapse:collapse;font-size:12.5px;}
+  .mini-table th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;color:#8A8272;padding:4px 8px 6px 0;font-weight:600;}
+  .mini-table td{padding:6px 8px 6px 0;border-top:1px solid var(--paper-line);}
+  .mini-table .succ-yes{color:var(--green);font-weight:600;}
+  .mini-table .succ-no{color:var(--red);font-weight:600;}
+
+  .sens-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-size:12.5px;border-top:1px solid var(--paper-line);}
+  .sens-row.highlight{font-weight:700;background:#F1EFE6;margin:0 -8px;padding:6px 8px;border-radius:6px;border-top:none;}
+  .sens-bar-track{flex:1;height:6px;background:var(--paper-line);border-radius:3px;margin:0 10px;position:relative;overflow:hidden;}
+  .sens-bar-fill{height:100%;border-radius:3px;}
+
+  .benchmark-compare{display:flex;gap:16px;margin-top:6px;}
+  .benchmark-col{flex:1;text-align:center;}
+  .benchmark-col .bc-label{font-size:10.5px;color:#8A8272;text-transform:uppercase;letter-spacing:.03em;}
+  .benchmark-col .bc-value{font-family:'Space Grotesk',sans-serif;font-size:20px;margin-top:4px;}
 </style>
 </head>
 <body>
@@ -300,11 +324,88 @@ async function checkDesirability(){
     if (!res.ok) { resultDiv.innerHTML = `<p class="error">${data.detail}</p>`; return; }
 
     const cls = data.success_probability >= 0.65 ? 'good' : data.success_probability >= 0.4 ? 'mid' : 'bad';
+
+    // Price benchmark: percentile bar + successful-price marker
+    const pb = data.price_benchmark;
+    const successMarkerPct = Math.min(100, Math.max(0, (pb.successful_median_price / (pb.category_median_price * 2)) * 100));
+    const priceBenchmarkHtml = `
+      <div class="report-section">
+        <p class="report-title">How your price compares</p>
+        <div class="percentile-track">
+          <div class="percentile-fill" style="width:${pb.price_percentile}%;"></div>
+          <div class="percentile-marker" style="left:${successMarkerPct}%;" title="Typical successful price"></div>
+        </div>
+        <div class="benchmark-row"><span>Your price is higher than ${pb.price_percentile.toFixed(0)}% of ${body.category} listings</span></div>
+        <div class="benchmark-row"><span>Category median: ₹${pb.category_median_price}</span><span>Typical successful price: ₹${pb.successful_median_price}</span></div>
+      </div>
+    `;
+
+    // Similar real products table
+    const similarRows = data.similar_products.map(p => `
+      <tr>
+        <td>${p.title}</td>
+        <td>₹${p.price}</td>
+        <td>${p.rating}★</td>
+        <td>${p.orders_last_30d}</td>
+        <td class="${p.succeeded ? 'succ-yes' : 'succ-no'}">${p.succeeded ? 'Succeeded' : 'Did not'}</td>
+      </tr>
+    `).join('');
+    const similarHtml = `
+      <div class="report-section">
+        <p class="report-title">Similar products at this price point</p>
+        <table class="mini-table">
+          <tr><th>Product</th><th>Price</th><th>Rating</th><th>Orders/30d</th><th>Outcome</th></tr>
+          ${similarRows}
+        </table>
+      </div>
+    `;
+
+    // Sensitivity: what-if table with mini bars
+    const sensRows = data.sensitivity.map(s => {
+      const isCurrent = s.label === "Your price";
+      const barColor = s.success_probability >= 0.65 ? '#2F6B4F' : s.success_probability >= 0.4 ? '#B87E05' : '#B3401E';
+      return `
+        <div class="sens-row ${isCurrent ? 'highlight' : ''}">
+          <span style="min-width:150px;">${s.label} ${s.discount_pct > body.discount_pct ? '' : `(₹${s.price})`}</span>
+          <div class="sens-bar-track"><div class="sens-bar-fill" style="width:${s.success_probability*100}%;background:${barColor};"></div></div>
+          <span style="min-width:40px;text-align:right;">${(s.success_probability*100).toFixed(0)}%</span>
+        </div>
+      `;
+    }).join('');
+    const sensitivityHtml = `
+      <div class="report-section">
+        <p class="report-title">What if you adjusted?</p>
+        ${sensRows}
+      </div>
+    `;
+
+    // Seller vs category benchmark
+    const sb = data.seller_benchmark;
+    const benchmarkHtml = `
+      <div class="report-section">
+        <p class="report-title">You vs. other sellers in ${body.category}</p>
+        <div class="benchmark-compare">
+          <div class="benchmark-col">
+            <div class="bc-label">Your success rate</div>
+            <div class="bc-value" style="color:${sb.seller_success_rate >= sb.category_avg_success_rate ? '#2F6B4F' : '#B3401E'};">${(sb.seller_success_rate*100).toFixed(0)}%</div>
+          </div>
+          <div class="benchmark-col">
+            <div class="bc-label">Category average</div>
+            <div class="bc-value">${(sb.category_avg_success_rate*100).toFixed(0)}%</div>
+          </div>
+        </div>
+      </div>
+    `;
+
     resultDiv.innerHTML = `
       <div class="result">
         <p class="verdict ${cls}">${data.verdict}</p>
         <p class="prob">Success probability: ${(data.success_probability * 100).toFixed(1)}% <span style="color:#8A8272;">— based on similar products in this category historically</span></p>
         <ul>${data.tips.map(t => `<li>${t}</li>`).join('')}</ul>
+        ${priceBenchmarkHtml}
+        ${sensitivityHtml}
+        ${similarHtml}
+        ${benchmarkHtml}
       </div>
     `;
   } catch (e) {

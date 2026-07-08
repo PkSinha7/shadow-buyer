@@ -69,9 +69,51 @@ print(f"ROC AUC:  {roc_auc_score(y_test, probs):.3f}")
 print(classification_report(y_test, preds))
 
 importances = sorted(zip(FEATURE_COLS, model.feature_importances_), key=lambda x: -x[1])
-print("\nFeature importances:")
+print("\nFeature importances (Random Forest):")
 for f, imp in importances:
     print(f"  {f:25s} {imp:.3f}")
+
+# ---------- Optional: compare against TabPFN, a tabular foundation model ----------
+# This is entirely optional and never breaks training if unavailable. TabPFN needs:
+#   1. pip install tabpfn
+#   2. A free Hugging Face account, having accepted the model's terms at
+#      https://huggingface.co/Prior-Labs/tabpfn_3, and being logged in via
+#      `hf auth login` (or an HF_TOKEN environment variable) on THIS machine.
+# If any of that isn't set up, this block just prints why and moves on --
+# Random Forest above is already saved and remains the app's guaranteed model.
+TABPFN_MAX_CONTEXT_ROWS = 800  # keeps CPU inference fast; TabPFN docs note CPU is
+                                # only fast up to ~1000 rows of context
+
+tabpfn_train_X, tabpfn_train_y = None, None
+try:
+    from tabpfn import TabPFNClassifier
+
+    if len(X_train) > TABPFN_MAX_CONTEXT_ROWS:
+        tabpfn_train_X, _, tabpfn_train_y, _ = train_test_split(
+            X_train, y_train,
+            train_size=TABPFN_MAX_CONTEXT_ROWS,
+            random_state=42,
+            stratify=y_train,
+        )
+    else:
+        tabpfn_train_X, tabpfn_train_y = X_train, y_train
+
+    tabpfn_model = TabPFNClassifier(device="cpu")
+    tabpfn_model.fit(tabpfn_train_X, tabpfn_train_y)
+    tabpfn_probs = tabpfn_model.predict_proba(X_test)[:, 1]
+    tabpfn_preds = (tabpfn_probs >= 0.5).astype(int)
+
+    print(f"\n--- TabPFN comparison (context: {len(tabpfn_train_X)} rows) ---")
+    print(f"Accuracy: {accuracy_score(y_test, tabpfn_preds):.3f}")
+    print(f"ROC AUC:  {roc_auc_score(y_test, tabpfn_probs):.3f}")
+    print("(Random Forest numbers are above for direct comparison)")
+
+except ImportError:
+    print("\nTabPFN not installed -- skipping comparison. (Run 'pip install tabpfn' to try it; app works fine without it.)")
+except Exception as e:
+    print(f"\nTabPFN unavailable -- skipping comparison: {type(e).__name__}: {str(e)[:200]}")
+    print("(Likely needs Hugging Face login/terms acceptance -- see comment above. App works fine without it.)")
+    tabpfn_train_X, tabpfn_train_y = None, None
 
 joblib.dump({
     "model": model,
@@ -79,6 +121,8 @@ joblib.dump({
     "categories": CATEGORIES,
     "seller_stats": seller_stats,
     "trend_summary": trend_summary.set_index("category"),
+    "tabpfn_train_X": tabpfn_train_X,   # small context sample for optional TabPFN use in app.py
+    "tabpfn_train_y": tabpfn_train_y,   # None if TabPFN wasn't available at training time
 }, "shadow_buyer_model.joblib")
 
 print("\nSaved shadow_buyer_model.joblib")
